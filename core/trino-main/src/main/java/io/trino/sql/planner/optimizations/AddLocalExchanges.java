@@ -810,6 +810,12 @@ public class AddLocalExchanges
         @Override
         public PlanWithProperties visitMergeWriter(MergeWriterNode node, StreamPreferredProperties parentPreferences)
         {
+            if (node.getPartitioningScheme().isEmpty() && node.getTarget().getMaxWriterTasks(plannerContext.getMetadata(), session).orElse(0) == 1) {
+                PlanWithProperties source = node.getSource().accept(this, defaultParallelism(session));
+                return rebaseAndDeriveProperties(node, ImmutableList.of(deriveProperties(
+                        gatheringExchange(idAllocator.getNextId(), LOCAL, source.getNode()),
+                        source.getProperties())));
+            }
             return visitTableWriter(node, node.getPartitioningScheme(), node.getSource(), parentPreferences, node.getTarget(), false);
         }
 

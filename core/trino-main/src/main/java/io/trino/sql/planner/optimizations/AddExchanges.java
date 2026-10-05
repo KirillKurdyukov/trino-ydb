@@ -789,6 +789,11 @@ public class AddExchanges
             PlanWithProperties source = node.getSource().accept(this, preferredProperties);
 
             Optional<PartitioningScheme> partitioningScheme = node.getPartitioningScheme();
+            if (partitioningScheme.isEmpty() && node.getTarget().getMaxWriterTasks(plannerContext.getMetadata(), session).orElse(0) == 1) {
+                return rebaseAndDeriveProperties(node, withDerivedProperties(
+                        gatheringExchange(idAllocator.getNextId(), REMOTE, source.getNode()),
+                        source.getProperties()));
+            }
             // Disable scale writers for merge operation. Currently, merge operation is not supported with scale
             // writers since it is supposed to writer a single partition from a single writer.
             // TODO: Add support for scale writers for merge operation. https://github.com/trinodb/trino/issues/14622

@@ -29,6 +29,7 @@ import io.trino.spi.session.PropertyMetadata;
 import io.trino.sql.planner.SystemPartitioningHandle;
 import io.trino.sql.planner.TestTableScanNodePartitioning;
 import io.trino.sql.planner.assertions.BasePlanTest;
+import io.trino.sql.planner.plan.MergeWriterNode;
 import io.trino.sql.planner.plan.TableExecuteNode;
 import io.trino.sql.planner.plan.TableScanNode;
 import io.trino.sql.planner.plan.TableWriterNode;
@@ -44,12 +45,15 @@ import static io.trino.SystemSessionProperties.MAX_WRITER_TASK_COUNT;
 import static io.trino.SystemSessionProperties.REDISTRIBUTE_WRITES;
 import static io.trino.SystemSessionProperties.RETRY_POLICY;
 import static io.trino.SystemSessionProperties.SCALE_WRITERS;
+import static io.trino.SystemSessionProperties.TASK_MAX_WRITER_COUNT;
+import static io.trino.SystemSessionProperties.TASK_MIN_WRITER_COUNT;
 import static io.trino.SystemSessionProperties.USE_PREFERRED_WRITE_PARTITIONING;
 import static io.trino.spi.connector.TableProcedureExecutionMode.distributedWithFilteringAndRepartitioning;
 import static io.trino.spi.type.VarcharType.VARCHAR;
 import static io.trino.sql.planner.SystemPartitioningHandle.FIXED_ARBITRARY_DISTRIBUTION;
 import static io.trino.sql.planner.SystemPartitioningHandle.FIXED_HASH_DISTRIBUTION;
 import static io.trino.sql.planner.SystemPartitioningHandle.SCALED_WRITER_HASH_DISTRIBUTION;
+import static io.trino.sql.planner.assertions.PlanMatchPattern.any;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.anyTree;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.exchange;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.node;
@@ -57,6 +61,7 @@ import static io.trino.sql.planner.assertions.PlanMatchPattern.tableScan;
 import static io.trino.sql.planner.assertions.PlanMatchPattern.values;
 import static io.trino.sql.planner.plan.ExchangeNode.Scope.LOCAL;
 import static io.trino.sql.planner.plan.ExchangeNode.Scope.REMOTE;
+import static io.trino.sql.planner.plan.ExchangeNode.Type.GATHER;
 import static io.trino.testing.TestingSession.testSessionBuilder;
 
 public class TestLimitMaxWriterNodesCount
@@ -136,6 +141,26 @@ public class TestLimitMaxWriterNodesCount
                         new ColumnMetadata("column_b", VARCHAR)))
                 .withName(catalogName)
                 .build();
+    }
+
+    @Test
+    public void testSingleWriterMergeIgnoresRequestedParallelism()
+    {
+        for (boolean redistribute : ImmutableList.of(true, false)) {
+            Session session = Session.builder(getPlanTester().getDefaultSession())
+                    .setCatalog(catalogNameWithMaxWriterTasksSpecified)
+                    .setSystemProperty(MAX_WRITER_TASK_COUNT, "8")
+                    .setSystemProperty(TASK_MIN_WRITER_COUNT, "4")
+                    .setSystemProperty(TASK_MAX_WRITER_COUNT, "4")
+                    .setSystemProperty(REDISTRIBUTE_WRITES, Boolean.toString(redistribute))
+                    .build();
+            assertDistributedPlan(
+                    "MERGE INTO unpartitioned_target_table t USING source_table s " +
+                            "ON t.column_a = s.column_a WHEN MATCHED THEN DELETE",
+                    session,
+                    anyTree(node(MergeWriterNode.class,
+                            exchange(LOCAL, GATHER, exchange(REMOTE, GATHER, anyTree(any()))))));
+        }
     }
 
     @Test

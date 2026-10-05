@@ -806,7 +806,7 @@ public class TableWriterNode
         @Override
         public OptionalInt getMaxWriterTasks(Metadata metadata, Session session)
         {
-            return OptionalInt.empty();
+            return metadata.getMaxWriterTasks(session, handle.catalogHandle().getCatalogName().toString());
         }
 
         @Override

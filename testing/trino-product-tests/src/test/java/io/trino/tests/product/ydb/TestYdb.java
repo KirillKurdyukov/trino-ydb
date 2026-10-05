@@ -39,17 +39,18 @@ class TestYdb
     {
         try (Connection conn = env.createTrinoConnection();
                 Statement stmt = conn.createStatement()) {
-            int count = stmt.executeUpdate("CREATE TABLE ydb.local.nation AS SELECT * FROM tpch.tiny.nation");
+            int count = stmt.executeUpdate("CREATE TABLE ydb.default.nation " +
+                    "WITH (primary_key = ARRAY['nationkey']) AS SELECT * FROM tpch.tiny.nation");
             try {
                 assertThat(count).isEqualTo(25);
 
-                try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ydb.local.nation")) {
+                try (ResultSet rs = stmt.executeQuery("SELECT COUNT(*) FROM ydb.default.nation")) {
                     assertThat(rs.next()).isTrue();
                     assertThat(rs.getLong(1)).isEqualTo(25);
                 }
             }
             finally {
-                stmt.execute("DROP TABLE ydb.local.nation");
+                stmt.execute("DROP TABLE ydb.default.nation");
             }
         }
     }

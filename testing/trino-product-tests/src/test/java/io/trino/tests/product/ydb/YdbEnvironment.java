@@ -47,13 +47,14 @@ public class YdbEnvironment
         ydb = new GenericContainer<>("ydbplatform/local-ydb@sha256:9e46fd45875551a75bcf34d0bb9ca0baa1d8763a4ccf2070af45f4467c4b7402")
                 .withNetwork(network)
                 .withNetworkAliases("ydb")
+                .withCreateContainerCmdModifier(command -> command.withHostName("ydb"))
                 .withExposedPorts(2136)
                 .withEnv("YDB_DEFAULT_LOG_LEVEL", "NOTICE")
                 .withEnv("GRPC_PORT", "2136")
                 .withEnv("GRPC_TLS_PORT", "2135")
                 .withEnv("MON_PORT", "8765")
                 .withEnv("YDB_USE_IN_MEMORY_PDISKS", "true")
-                .waitingFor(Wait.forLogMessage(".*Server run loop enter.*", 1)
+                .waitingFor(Wait.forHealthcheck()
                         .withStartupTimeout(Duration.ofMinutes(5)));
         ydb.start();
 
@@ -61,7 +62,7 @@ public class YdbEnvironment
                 .withNetwork(network)
                 .withCatalog("ydb", Map.of(
                         "connector.name", "ydb",
-                        "connection-url", "jdbc:ydb:grpc://ydb:2136/local"))
+                        "connection-url", "jdbc:ydb:grpc://ydb:2136/local?useQueryService=true"))
                 .build();
         TrinoProductTestContainer.startAndWait(trino);
     }

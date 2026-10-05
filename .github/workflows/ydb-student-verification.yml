@@ -1,0 +1,113 @@
+name: YDB student correction verification
+
+on:
+  push:
+    branches: [qa/ydb-student-verification-20261005]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+env:
+  CONTINUOUS_INTEGRATION: true
+  MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
+  MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
+  TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
+
+jobs:
+  connector:
+    name: Connector checks JDK ${{ matrix.java }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['25.0.4', '27', '28-ea']
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: 045b1815e9790fcac111b77406fdfca8531d5168
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          java-version: ${{ matrix.java }}
+          cache: 'true'
+          cleanup-node: 'true'
+      - name: Build reactor with all Maven checks
+        run: ./mvnw -B -ntp -pl plugin/trino-ydb -am -DskipTests install
+      - name: Core MERGE planner regressions
+        if: matrix.java == '25.0.4'
+        run: ./mvnw -B -ntp -pl core/trino-main -Dtest=TestLimitMaxWriterNodesCount verify
+      - name: Error Prone
+        if: matrix.java == '25.0.4'
+        run: ./mvnw -B -ntp -pl plugin/trino-ydb -Perrorprone-compiler -DskipTests clean test-compile
+      - name: Complete YDB connector suite
+        if: matrix.java == '25.0.4'
+        run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: connector-reports-${{ matrix.java }}
+          path: |
+            plugin/trino-ydb/target/surefire-reports/
+            core/trino-main/target/surefire-reports/
+
+  product:
+    name: Packaged server and SuiteYdb
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: 045b1815e9790fcac111b77406fdfca8531d5168
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache: 'true'
+          cleanup-node: 'true'
+      - name: Build server and product distribution with Maven checks
+        run: ./mvnw -B -ntp -T 2 -DskipTests -P product-test-distribution -pl '!:trino-docs' install
+      - name: Verify YDB is shipped
+        run: |
+          archive=core/trino-server/target/trino-server-484-SNAPSHOT.tar.gz
+          tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-484-SNAPSHOT\.jar$'
+          tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-484-SNAPSHOT-services\.jar$'
+      - name: Build image from this exact server archive
+        run: core/docker/build.sh -a amd64 -t ydb-student-correction -x
+      - name: Run real production CTAS, count and drop
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-student-correction:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            io.trino.tests.product.suite.SuiteYdb
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: product-reports
+          path: |
+            testing/trino-product-tests/target/surefire-reports/
+            testing/trino-product-tests/target/reports/
+            logs/
+
+  docs:
+    name: Documentation build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: 045b1815e9790fcac111b77406fdfca8531d5168
+          persist-credentials: false
+      - name: Build actual Sphinx documentation
+        run: docs/build
+      - name: Verify connector page
+        run: test -s docs/target/html/connector/ydb.html

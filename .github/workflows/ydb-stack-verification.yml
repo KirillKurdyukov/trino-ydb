@@ -16,9 +16,9 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: fcea1e6970ab992ce2386e43d65abafc7d2070e3
+  SOURCE_SHA: d5badc2bec81ce2e0df3aed426d670b45431d1e9
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 6ba02846e2ea60af55b2bc137432f304774eb385
+  EXPECTED_INTEGRATION_TREE_SHA: d04b06779ff7d8ff5540a6e7a5b774f20904fc7e
 
 jobs:
   connector:
@@ -62,6 +62,12 @@ jobs:
         run: |
           ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testRenameTable*,TestYdbConnectorTest#testInsert*+testAdd*+testAlterTableAddLongColumnName+testDropColumn+testDropAndAddColumnWithSameName+testDropRowField*+testDropNotNullConstraint*+testRenameTable*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
           cp -R plugin/trino-ydb/target/surefire-reports plugin/trino-ydb/target/direct-write-reports
+      - name: Direct expression and predicate regressions
+        if: matrix.java == '25.0.4'
+        run: |
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbExpressionRewrites,TestYdbExpressionPushdown' test
+          mkdir -p plugin/trino-ydb/target/direct-expression-reports
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbExpression* plugin/trino-ydb/target/direct-expression-reports/
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
@@ -72,6 +78,7 @@ jobs:
           path: |
             plugin/trino-ydb/target/surefire-reports/
             plugin/trino-ydb/target/direct-write-reports/
+            plugin/trino-ydb/target/direct-expression-reports/
             core/trino-main/target/surefire-reports/
             integration-tree.txt
 
@@ -86,7 +93,9 @@ jobs:
           sparse-checkout: .github/qa/ydb-stack
           sparse-checkout-cone-mode: false
       - name: Preserve independent HTTP QA harness
-        run: cp .github/qa/ydb-stack/YdbWriteHttpProof.java "$RUNNER_TEMP/YdbWriteHttpProof.java"
+        run: |
+          cp .github/qa/ydb-stack/YdbWriteHttpProof.java "$RUNNER_TEMP/YdbWriteHttpProof.java"
+          cp .github/qa/ydb-stack/YdbExpressionHttpProof.java "$RUNNER_TEMP/YdbExpressionHttpProof.java"
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
@@ -140,6 +149,16 @@ jobs:
             -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbWriteHttpProof.java" "$GITHUB_WORKSPACE/logs/runtime-http.json"
+      - name: Run independent expression HTTP and EXPLAIN proof
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            "$RUNNER_TEMP/YdbExpressionHttpProof.java" "$GITHUB_WORKSPACE/logs/expression-http.json"
       - name: Verify cleanup of owned QA containers and networks
         if: always()
         run: |

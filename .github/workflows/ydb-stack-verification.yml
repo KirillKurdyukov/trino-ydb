@@ -16,9 +16,9 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: 5101d0c5d36e5f6ae4eeb504729953aae1de1b5f
+  SOURCE_SHA: 0ab9f93c783263a702f236a2d7a4d266a5d7bee0
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 4a9386fa4d95d53dda1b0c60e6c5ae7bb70cd061
+  EXPECTED_INTEGRATION_TREE_SHA: 770730d72f64072f5a339bc02507e71d47f3e506
 
 jobs:
   connector:
@@ -60,7 +60,7 @@ jobs:
       - name: Direct CREATE, INSERT and DDL regressions
         if: matrix.java == '25.0.4'
         run: |
-          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testRenameTable*,TestYdbConnectorTest#testInsert*+testAdd*+testDropColumn+testDropRowField*+testDropNotNullConstraint*+testRenameTable*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testRenameTable*,TestYdbConnectorTest#testInsert*+testAdd*+testAlterTableAddLongColumnName+testDropColumn+testDropRowField*+testDropNotNullConstraint*+testRenameTable*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
           cp -R plugin/trino-ydb/target/surefire-reports plugin/trino-ydb/target/direct-write-reports
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'

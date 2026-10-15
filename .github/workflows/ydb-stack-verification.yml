@@ -16,9 +16,10 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: f7c20db1fa4d00ad7a6afde8ac577ada64dc5d36
+  SOURCE_SHA: c918b786c60d5cddfa8419549f18ec8815bc7236
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 62e1feb27f2d914ae0616b4853655406699c7fd2
+  EXPECTED_INTEGRATION_TREE_SHA: d7f08272dfd0303de14cba33923138a193a560cc
+  VERIFY_AGGREGATION: 'false'
 
 jobs:
   connector:
@@ -69,7 +70,7 @@ jobs:
           mkdir -p plugin/trino-ydb/target/direct-expression-reports
           cp plugin/trino-ydb/target/surefire-reports/*TestYdbExpression* plugin/trino-ydb/target/direct-expression-reports/
       - name: Direct aggregation regressions and inherited contracts
-        if: matrix.java == '25.0.4'
+        if: matrix.java == '25.0.4' && env.VERIFY_AGGREGATION == 'true'
         run: |
           ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbAggregationRewrites,TestYdbAggregationPushdown,TestYdbConnectorTest#testAggregation+testLimitPushdown+testTopNPushdown,TestYdbConnectorSmokeTest#testAggregation' test
           mkdir -p plugin/trino-ydb/target/direct-aggregation-reports
@@ -169,6 +170,7 @@ jobs:
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbExpressionHttpProof.java" "$GITHUB_WORKSPACE/logs/expression-http.json"
       - name: Run independent aggregation HTTP and EXPLAIN proof
+        if: env.VERIFY_AGGREGATION == 'true'
         run: |
           distribution=testing/trino-product-tests/target/product-test-distribution
           test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)

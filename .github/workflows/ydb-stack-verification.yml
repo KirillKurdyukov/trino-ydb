@@ -16,9 +16,9 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: 0e632c883f71a899bfc361fc341a944e0b383ed9
+  SOURCE_SHA: f7c20db1fa4d00ad7a6afde8ac577ada64dc5d36
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: cfd5b971a473d1156d4efdac4bb88079dcf64702
+  EXPECTED_INTEGRATION_TREE_SHA: 62e1feb27f2d914ae0616b4853655406699c7fd2
 
 jobs:
   connector:
@@ -68,6 +68,13 @@ jobs:
           ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbExpressionRewrites,TestYdbExpressionPushdown' test
           mkdir -p plugin/trino-ydb/target/direct-expression-reports
           cp plugin/trino-ydb/target/surefire-reports/*TestYdbExpression* plugin/trino-ydb/target/direct-expression-reports/
+      - name: Direct aggregation regressions and inherited contracts
+        if: matrix.java == '25.0.4'
+        run: |
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbAggregationRewrites,TestYdbAggregationPushdown,TestYdbConnectorTest#testAggregation+testLimitPushdown+testTopNPushdown,TestYdbConnectorSmokeTest#testAggregation' test
+          mkdir -p plugin/trino-ydb/target/direct-aggregation-reports
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbAggregation* plugin/trino-ydb/target/direct-aggregation-reports/
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorTest* plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorSmokeTest* plugin/trino-ydb/target/direct-aggregation-reports/
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
@@ -79,6 +86,7 @@ jobs:
             plugin/trino-ydb/target/surefire-reports/
             plugin/trino-ydb/target/direct-write-reports/
             plugin/trino-ydb/target/direct-expression-reports/
+            plugin/trino-ydb/target/direct-aggregation-reports/
             core/trino-main/target/surefire-reports/
             integration-tree.txt
 
@@ -96,6 +104,7 @@ jobs:
         run: |
           cp .github/qa/ydb-stack/YdbWriteHttpProof.java "$RUNNER_TEMP/YdbWriteHttpProof.java"
           cp .github/qa/ydb-stack/YdbExpressionHttpProof.java "$RUNNER_TEMP/YdbExpressionHttpProof.java"
+          cp .github/qa/ydb-stack/YdbAggregationHttpProof.java "$RUNNER_TEMP/YdbAggregationHttpProof.java"
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
@@ -159,6 +168,16 @@ jobs:
             -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbExpressionHttpProof.java" "$GITHUB_WORKSPACE/logs/expression-http.json"
+      - name: Run independent aggregation HTTP and EXPLAIN proof
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            "$RUNNER_TEMP/YdbAggregationHttpProof.java" "$GITHUB_WORKSPACE/logs/aggregation-http.json"
       - name: Verify cleanup of owned QA containers and networks
         if: always()
         run: |

@@ -96,6 +96,45 @@ public final class YdbWriteHttpProof
             expectUpdate(client, statement, "INSERT INTO ydb.default.stack_not_null VALUES (1, true, 'first'), (2, NULL, 'second')", 2);
             QueryResult booleans = success(client, statement, "SELECT id, flag, required_value FROM ydb.default.stack_not_null ORDER BY id");
             require(booleans.rows().equals(List.of(JSON.readTree("[1,true,\"first\"]"), JSON.readTree("[2,null,\"second\"]"))), "Staged writes must preserve NOT NULL and typed boolean NULL values");
+            success(client, statement, "ALTER TABLE ydb.default.stack_not_null ADD COLUMN added_value varchar");
+            QueryResult added = success(client, statement, "SELECT id, added_value FROM ydb.default.stack_not_null ORDER BY id");
+            require(added.rows().equals(List.of(JSON.readTree("[1,null]"), JSON.readTree("[2,null]"))), "Existing rows must receive NULL after ADD COLUMN");
+            expectError(client, statement, "ALTER TABLE ydb.default.stack_not_null ADD COLUMN rejected_value varchar NOT NULL", "NOT_SUPPORTED");
+            expectError(client, statement, "ALTER TABLE ydb.default.stack_not_null DROP COLUMN id", "NOT_SUPPORTED");
+            expectError(client, statement, "ALTER TABLE ydb.default.stack_not_null ALTER COLUMN id DROP NOT NULL", "NOT_SUPPORTED");
+            success(client, statement, "ALTER TABLE ydb.default.stack_not_null ALTER COLUMN required_value DROP NOT NULL");
+            expectUpdate(client, statement, "INSERT INTO ydb.default.stack_not_null (id, flag, required_value, added_value) VALUES (3, false, NULL, 'added')", 1);
+            QueryResult altered = success(client, statement, "SELECT id, flag, required_value, added_value FROM ydb.default.stack_not_null ORDER BY id");
+            require(altered.rows().equals(List.of(JSON.readTree("[1,true,\"first\",null]"), JSON.readTree("[2,null,\"second\",null]"), JSON.readTree("[3,false,null,\"added\"]"))), "ALTER must preserve existing values and accept NULL only after DROP NOT NULL");
+            success(client, statement, "ALTER TABLE ydb.default.stack_not_null DROP COLUMN added_value");
+            success(client, statement, "ALTER TABLE ydb.default.stack_not_null RENAME TO ydb.default.stack_renamed");
+            QueryResult renamed = success(client, statement, "SELECT id, flag, required_value FROM ydb.default.stack_renamed ORDER BY id");
+            require(renamed.rows().equals(List.of(JSON.readTree("[1,true,\"first\"]"), JSON.readTree("[2,null,\"second\"]"), JSON.readTree("[3,false,null]"))), "RENAME must preserve all remaining columns and rows");
+            expectError(client, statement, "ALTER TABLE ydb.default.stack_renamed RENAME TO ydb.other_schema.stack_invalid", "NOT_SUPPORTED");
+            expectError(client, statement, "ALTER TABLE ydb.default.stack_renamed RENAME COLUMN required_value TO renamed_value", "NOT_SUPPORTED");
+            try (Connection connection = environment.createYdbConnection()) {
+                try (ResultSet tables = connection.getMetaData().getTables(null, null, "stack_not_null", null)) {
+                    require(!tables.next(), "Old table name must disappear after RENAME");
+                }
+                Map<String, Integer> nullableColumns = new LinkedHashMap<>();
+                try (ResultSet columns = connection.getMetaData().getColumns(null, null, "stack_renamed", null)) {
+                    while (columns.next()) {
+                        nullableColumns.put(columns.getString("COLUMN_NAME"), columns.getInt("NULLABLE"));
+                    }
+                }
+                require(nullableColumns.size() == 3
+                        && nullableColumns.get("id") == java.sql.DatabaseMetaData.columnNoNulls
+                        && nullableColumns.get("required_value") == java.sql.DatabaseMetaData.columnNullable
+                        && !nullableColumns.containsKey("added_value")
+                        && !nullableColumns.containsKey("rejected_value"), "Native metadata must confirm dropped column and changed non-key nullability");
+                try (Statement nativeStatement = connection.createStatement();
+                        ResultSet rows = nativeStatement.executeQuery("SELECT id, flag, required_value FROM stack_renamed ORDER BY id")) {
+                    require(rows.next() && rows.getLong(1) == 1 && rows.getBoolean(2) && rows.getString(3).equals("first"), "DDL must preserve first native row");
+                    require(rows.next() && rows.getLong(1) == 2 && rows.getObject(2) == null && rows.getString(3).equals("second"), "DDL must preserve native boolean NULL");
+                    require(rows.next() && rows.getLong(1) == 3 && !rows.getBoolean(2) && rows.getObject(3) == null && !rows.next(), "Native read must confirm newly nullable value");
+                }
+                evidence.put("nativeDdlState", Map.of("table", "stack_renamed", "rows", 3, "columnNullability", nullableColumns));
+            }
             for (String sql : List.of(
                     "UPDATE ydb.default.stack_write SET event_id = 11 WHERE tenant = 1",
                     "UPDATE ydb.default.stack_write SET payload = 'changed' WHERE tenant = 1",
@@ -112,7 +151,7 @@ public final class YdbWriteHttpProof
                 require(rows.next() && rows.getString(1).equals("explicit-opt-in") && rows.getLong(2) == 4 && !rows.next(), "Native read must confirm nontransactional insert and no extra rows");
                 evidence.put("nativeFinalRows", 4);
             }
-            for (String table : List.of("stack_write", "stack_ctas", "stack_native", "stack_not_null")) {
+            for (String table : List.of("stack_write", "stack_ctas", "stack_native", "stack_renamed")) {
                 success(client, statement, "DROP TABLE ydb.default." + table);
                 try (Connection connection = environment.createYdbConnection();
                         ResultSet tables = connection.getMetaData().getTables(null, null, table, null)) {
@@ -144,9 +183,9 @@ public final class YdbWriteHttpProof
             Files.writeString(evidencePath, JSON.writerWithDefaultPrettyPrinter().writeValueAsString(evidence));
         }
         if (failure != null) {
-            throw new RuntimeException("CREATE/INSERT HTTP proof failed", failure);
+            throw new RuntimeException("CREATE/INSERT/DDL HTTP proof failed", failure);
         }
-        System.out.println("PASS: CREATE, composite keys, staged INSERT atomicity, CTAS, native types, opt-in INSERT, rejected DML and DROP");
+        System.out.println("PASS: CREATE, composite keys, staged INSERT atomicity, CTAS, native types, opt-in INSERT, column changes, rename, rejected DML and DROP");
     }
 
     private static QueryResult success(HttpClient client, URI endpoint, String sql)

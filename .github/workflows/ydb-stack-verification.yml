@@ -16,9 +16,9 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: e8312003ff71a2a70555c10ace960d379a6bd3a9
+  SOURCE_SHA: 5101d0c5d36e5f6ae4eeb504729953aae1de1b5f
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 221e6250b3854cbc45b4b998180f19753b3d6735
+  EXPECTED_INTEGRATION_TREE_SHA: 4a9386fa4d95d53dda1b0c60e6c5ae7bb70cd061
 
 jobs:
   connector:
@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: e8312003ff71a2a70555c10ace960d379a6bd3a9
+          ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
           persist-credentials: false
       - name: Integrate pinned upstream base without changing published history
@@ -57,10 +57,10 @@ jobs:
       - name: Error Prone
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb -Perrorprone-compiler -DskipTests clean test-compile
-      - name: Direct CREATE and INSERT regressions
+      - name: Direct CREATE, INSERT and DDL regressions
         if: matrix.java == '25.0.4'
         run: |
-          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testCreateTable+testCreateTableAsSelect+testShowCreateTable,TestYdbConnectorTest#testInsert*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testRenameTable*,TestYdbConnectorTest#testInsert*+testAdd*+testDropColumn+testDropRowField*+testDropNotNullConstraint*+testRenameTable*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
           cp -R plugin/trino-ydb/target/surefire-reports plugin/trino-ydb/target/direct-write-reports
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
@@ -90,7 +90,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: e8312003ff71a2a70555c10ace960d379a6bd3a9
+          ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
           persist-credentials: false
       - name: Integrate pinned upstream base without changing published history
@@ -191,7 +191,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: e8312003ff71a2a70555c10ace960d379a6bd3a9
+          ref: ${{ env.SOURCE_SHA }}
           fetch-depth: 0
           persist-credentials: false
       - name: Integrate pinned upstream base without changing published history

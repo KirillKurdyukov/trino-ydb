@@ -22,6 +22,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -49,6 +50,14 @@ public final class YdbAggregationHttpProof
             environment.start();
             try (Connection connection = environment.createYdbConnection();
                     Statement nativeStatement = connection.createStatement()) {
+                nativeStatement.execute("CREATE TABLE nation (nationkey Int64, name Utf8, PRIMARY KEY (nationkey))");
+                try (PreparedStatement insert = connection.prepareStatement("INSERT INTO nation (nationkey, name) VALUES (?, ?)")) {
+                    for (int key = 0; key < 25; key++) {
+                        insert.setLong(1, key);
+                        insert.setString(2, key == 1 ? "ARGENTINA" : "nation_" + key);
+                        insert.executeUpdate();
+                    }
+                }
                 nativeStatement.execute("CREATE TABLE aggregation_edges (id Int64, n Int64, s Utf8, f Double, r Float, u Uint64, PRIMARY KEY (id))");
                 nativeStatement.execute("INSERT INTO aggregation_edges (id, n, s, f, r, u) VALUES " +
                         "(1, 1, 'A'u, 1.5, 1.5f, 1ul), (2, 1, 'a'u, 2.5, 2.5f, 2ul), " +

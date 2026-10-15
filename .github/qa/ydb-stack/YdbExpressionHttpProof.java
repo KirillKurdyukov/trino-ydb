@@ -83,7 +83,8 @@ public final class YdbExpressionHttpProof
             require(concatenated.rows().equals(List.of(JSON.readTree("[\"Hello\uD83D\uDE00!\"]"), JSON.readTree("[\"M\u00DCNCHEN!\"]"),
                     JSON.readTree("[null]"), JSON.readTree("[\"!\"]"), JSON.readTree("[null]"))), "Varchar concatenation must preserve Unicode, empty strings and NULL");
             // Trino 484 ConcatFunction limits results to PageBuilderStatus's 1 MiB.
-            expectError(client, statement, "SELECT s || repeat('x', 1048576) FROM ydb.default.expression_edges WHERE id = 1", "INVALID_FUNCTION_ARGUMENT");
+            require(success(client, statement, "SELECT length(lpad('', 1048576, 'x'))").rows().equals(List.of(JSON.readTree("[1048576]"))), "The concatenation input must be a valid 1 MiB varchar");
+            expectError(client, statement, "SELECT s || lpad('', 1048576, 'x') FROM ydb.default.expression_edges WHERE id = 1", "INVALID_FUNCTION_ARGUMENT");
             String pushedPlan = success(client, statement, "EXPLAIN " + unicodeSql).rows().getFirst().get(0).asText();
             require(pushedPlan.contains("Unicode::ToLower") && pushedPlan.contains("Unicode::ToUpper") && pushedPlan.contains("Unicode::Find"), "EXPLAIN must expose actual remote Unicode functions");
             QueryResult disabledExplain = execute(client, statement, "EXPLAIN " + unicodeSql, "ydb.complex_expression_pushdown=false");

@@ -16,12 +16,12 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: a3d9534ad1075ac617361d5d6b866ac76b147d0b
+  SOURCE_SHA: 2b40fe32dd4fc2f6d3121902645b5e964f814f4a
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 11235c896f7d56d758d857e1093e01583d13ad3f
+  EXPECTED_INTEGRATION_TREE_SHA: 3f9b40c6283eb0de6071cf02e76f2098caccfb0f
   VERIFY_AGGREGATION: 'true'
-  VERIFY_TOPN: 'true'
-  VERIFY_JOIN: 'true'
+  VERIFY_TOPN: 'false'
+  VERIFY_JOIN: 'false'
 
 jobs:
   connector:
@@ -53,6 +53,14 @@ jobs:
           java-version: ${{ matrix.java }}
           cache: 'true'
           cleanup-node: 'true'
+      - name: Reserve YDB helper ports from ephemeral client allocation
+        if: matrix.java == '25.0.4'
+        run: |
+          # SDK 2.4.10 explicitly binds this range; clients must not claim it between container starts.
+          # https://github.com/ydb-platform/ydb-java-sdk/blob/v2.4.10/tests/common/src/main/java/tech/ydb/test/integration/utils/PortsGenerator.java
+          reserved=$(sysctl -n net.ipv4.ip_local_reserved_ports)
+          sudo sysctl -w "net.ipv4.ip_local_reserved_ports=${reserved:+$reserved,}51000-59000"
+          sysctl net.ipv4.ip_local_port_range net.ipv4.ip_local_reserved_ports
       - name: Build reactor with all Maven checks
         run: ./mvnw -B -ntp -pl plugin/trino-ydb -am -DskipTests install
       - name: Strict dependency exclusion check

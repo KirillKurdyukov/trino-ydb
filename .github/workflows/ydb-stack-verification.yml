@@ -16,10 +16,11 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: 5f11db7e2ffadbae85e37955da700bb474d598ca
+  SOURCE_SHA: 8ee4589376418b1917e7bc542a1d5de245336436
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 297d21ec76e81bf3c7281909777cafd922bb47dc
+  EXPECTED_INTEGRATION_TREE_SHA: 0652e3603324bfb70ad7aaf907ab0885c0fd96ce
   VERIFY_AGGREGATION: 'true'
+  VERIFY_TOPN: 'true'
 
 jobs:
   connector:
@@ -76,6 +77,12 @@ jobs:
           mkdir -p plugin/trino-ydb/target/direct-aggregation-reports
           cp plugin/trino-ydb/target/surefire-reports/*TestYdbAggregation* plugin/trino-ydb/target/direct-aggregation-reports/
           cp plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorTest* plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorSmokeTest* plugin/trino-ydb/target/direct-aggregation-reports/
+      - name: Direct TopN ordering regressions
+        if: matrix.java == '25.0.4' && env.VERIFY_TOPN == 'true'
+        run: |
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbTopN,TestYdbTopNPushdown' test
+          mkdir -p plugin/trino-ydb/target/direct-topn-reports
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbTopN* plugin/trino-ydb/target/direct-topn-reports/
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
@@ -88,6 +95,7 @@ jobs:
             plugin/trino-ydb/target/direct-write-reports/
             plugin/trino-ydb/target/direct-expression-reports/
             plugin/trino-ydb/target/direct-aggregation-reports/
+            plugin/trino-ydb/target/direct-topn-reports/
             core/trino-main/target/surefire-reports/
             integration-tree.txt
 
@@ -106,6 +114,7 @@ jobs:
           cp .github/qa/ydb-stack/YdbWriteHttpProof.java "$RUNNER_TEMP/YdbWriteHttpProof.java"
           cp .github/qa/ydb-stack/YdbExpressionHttpProof.java "$RUNNER_TEMP/YdbExpressionHttpProof.java"
           cp .github/qa/ydb-stack/YdbAggregationHttpProof.java "$RUNNER_TEMP/YdbAggregationHttpProof.java"
+          cp .github/qa/ydb-stack/YdbTopNHttpProof.java "$RUNNER_TEMP/YdbTopNHttpProof.java"
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
@@ -180,6 +189,17 @@ jobs:
             -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbAggregationHttpProof.java" "$GITHUB_WORKSPACE/logs/aggregation-http.json"
+      - name: Run independent TopN HTTP and EXPLAIN proof
+        if: env.VERIFY_TOPN == 'true'
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            "$RUNNER_TEMP/YdbTopNHttpProof.java" "$GITHUB_WORKSPACE/logs/topn-http.json"
       - name: Verify cleanup of owned QA containers and networks
         if: always()
         run: |

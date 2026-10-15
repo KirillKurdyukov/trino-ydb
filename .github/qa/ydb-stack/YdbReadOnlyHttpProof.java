@@ -42,6 +42,8 @@ public final class YdbReadOnlyHttpProof
         Path evidencePath = Path.of(args[0]);
         Map<String, Object> evidence = new LinkedHashMap<>();
         evidence.put("sourceSha", System.getenv("SOURCE_SHA"));
+        evidence.put("upstreamBaseSha", System.getenv("UPSTREAM_BASE_SHA"));
+        evidence.put("integrationTreeSha", System.getenv("INTEGRATION_TREE_SHA"));
         evidence.put("queries", QUERIES);
         YdbEnvironment environment = new YdbEnvironment();
         Throwable failure = null;

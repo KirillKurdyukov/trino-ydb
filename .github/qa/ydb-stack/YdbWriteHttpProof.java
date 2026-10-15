@@ -87,6 +87,13 @@ public final class YdbWriteHttpProof
             require(nativeCount.rows().size() == 1 && nativeCount.rows().getFirst().get(0).asLong() == 2, "Rejected unsigned writes must not add rows");
             QueryResult nontransactional = execute(client, statement, "INSERT INTO ydb.default.stack_write VALUES ('explicit-opt-in', 4, 40)", "ydb.non_transactional_insert=true");
             require(nontransactional.error() == null && nontransactional.updateCount() != null && nontransactional.updateCount() == 1, "Explicit nontransactional INSERT must work");
+            expectUpdate(client, statement, "INSERT INTO ydb.default.stack_write (payload, tenant) VALUES ('implicit-null-key', 3)", 1);
+            QueryResult partialDirect = execute(client, statement, "INSERT INTO ydb.default.stack_write (payload, tenant) VALUES ('must-not-appear', 5)", "ydb.non_transactional_insert=true");
+            require(partialDirect.error() != null && partialDirect.error().path("errorName").asText().equals("NOT_SUPPORTED"), "Direct INSERT must reject missing physical key columns before writing");
+            success(client, statement, "CREATE TABLE ydb.default.stack_not_null (id bigint NOT NULL, flag boolean, required_value varchar NOT NULL) WITH (primary_key = ARRAY['id'])");
+            expectUpdate(client, statement, "INSERT INTO ydb.default.stack_not_null VALUES (1, true, 'first'), (2, NULL, 'second')", 2);
+            QueryResult booleans = success(client, statement, "SELECT id, flag, required_value FROM ydb.default.stack_not_null ORDER BY id");
+            require(booleans.rows().equals(List.of(JSON.readTree("[1,true,\"first\"]"), JSON.readTree("[2,null,\"second\"]"))), "Staged writes must preserve NOT NULL and typed boolean NULL values");
             for (String sql : List.of(
                     "UPDATE ydb.default.stack_write SET event_id = 11 WHERE tenant = 1",
                     "UPDATE ydb.default.stack_write SET payload = 'changed' WHERE tenant = 1",
@@ -99,10 +106,11 @@ public final class YdbWriteHttpProof
                     ResultSet rows = nativeStatement.executeQuery("SELECT payload, tenant FROM stack_write ORDER BY tenant")) {
                 require(rows.next() && rows.getString(1).equals("ok") && rows.getLong(2) == 1, "Unsupported DML must preserve original row");
                 require(rows.next() && rows.getString(1).equals("nullable-key") && rows.getLong(2) == 2, "Nullable-key row must remain");
+                require(rows.next() && rows.getString(1).equals("implicit-null-key") && rows.getLong(2) == 3, "Missing nullable key must be supplied by staged publication");
                 require(rows.next() && rows.getString(1).equals("explicit-opt-in") && rows.getLong(2) == 4 && !rows.next(), "Native read must confirm nontransactional insert and no extra rows");
-                evidence.put("nativeFinalRows", 3);
+                evidence.put("nativeFinalRows", 4);
             }
-            for (String table : List.of("stack_write", "stack_ctas", "stack_native")) {
+            for (String table : List.of("stack_write", "stack_ctas", "stack_native", "stack_not_null")) {
                 success(client, statement, "DROP TABLE ydb.default." + table);
                 try (Connection connection = environment.createYdbConnection();
                         ResultSet tables = connection.getMetaData().getTables(null, null, table, null)) {

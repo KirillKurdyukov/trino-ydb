@@ -16,7 +16,7 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: 6c13c2f3031fe0ee2c84b176bf0cc1f703f21e99
+  SOURCE_SHA: 392a0c6edb24cccd19ef50cc267098807a78a6cd
 
 jobs:
   connector:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: 6c13c2f3031fe0ee2c84b176bf0cc1f703f21e99
+          ref: 392a0c6edb24cccd19ef50cc267098807a78a6cd
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: 6c13c2f3031fe0ee2c84b176bf0cc1f703f21e99
+          ref: 392a0c6edb24cccd19ef50cc267098807a78a6cd
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -169,7 +169,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: 6c13c2f3031fe0ee2c84b176bf0cc1f703f21e99
+          ref: 392a0c6edb24cccd19ef50cc267098807a78a6cd
           persist-credentials: false
       - name: Build actual Sphinx documentation
         run: docs/build

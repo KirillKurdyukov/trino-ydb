@@ -16,9 +16,9 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: e8312003ff71a2a70555c10ace960d379a6bd3a9
-  UPSTREAM_BASE_SHA: 7e9f956f224dda3aa4ca843443cfd783c85e8e60
-  EXPECTED_INTEGRATION_TREE_SHA: 164e79a0960472d99f40f797bb3c6ccb1654ad72
+  SOURCE_SHA: a334ea8729f6402223ff20a5bac268bc6c30ac7a
+  UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
+  EXPECTED_INTEGRATION_TREE_SHA: a5d582e7cdc1a9352870e22a89dff50bf57d41dd
 
 jobs:
   connector:
@@ -33,7 +33,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: e8312003ff71a2a70555c10ace960d379a6bd3a9
+          ref: a334ea8729f6402223ff20a5bac268bc6c30ac7a
           fetch-depth: 0
           persist-credentials: false
       - name: Integrate pinned upstream base without changing published history
@@ -57,11 +57,11 @@ jobs:
       - name: Error Prone
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb -Perrorprone-compiler -DskipTests clean test-compile
-      - name: Direct CREATE and INSERT regressions
+      - name: Direct read-only regression methods
         if: matrix.java == '25.0.4'
         run: |
-          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testCreateTable+testCreateTableAsSelect+testShowCreateTable,TestYdbConnectorTest#testInsert*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
-          cp -R plugin/trino-ydb/target/surefire-reports plugin/trino-ydb/target/direct-write-reports
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbConnectorSmokeTest#testCreateTableAsSelect+testShowCreateTable,TestYdbConnectorTest#testCreateTableAsSelect+testNativeTypeReads+testReadOnlyWritesRejected' test
+          cp -R plugin/trino-ydb/target/surefire-reports plugin/trino-ydb/target/direct-read-only-reports
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
@@ -71,7 +71,7 @@ jobs:
           name: connector-reports-${{ matrix.java }}
           path: |
             plugin/trino-ydb/target/surefire-reports/
-            plugin/trino-ydb/target/direct-write-reports/
+            plugin/trino-ydb/target/direct-read-only-reports/
             core/trino-main/target/surefire-reports/
             integration-tree.txt
 
@@ -86,11 +86,11 @@ jobs:
           sparse-checkout: .github/qa/ydb-stack
           sparse-checkout-cone-mode: false
       - name: Preserve independent HTTP QA harness
-        run: cp .github/qa/ydb-stack/YdbWriteHttpProof.java "$RUNNER_TEMP/YdbWriteHttpProof.java"
+        run: cp .github/qa/ydb-stack/YdbReadOnlyHttpProof.java "$RUNNER_TEMP/YdbReadOnlyHttpProof.java"
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: e8312003ff71a2a70555c10ace960d379a6bd3a9
+          ref: a334ea8729f6402223ff20a5bac268bc6c30ac7a
           fetch-depth: 0
           persist-credentials: false
       - name: Integrate pinned upstream base without changing published history
@@ -114,20 +114,20 @@ jobs:
           tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-484-SNAPSHOT\.jar$'
           tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-484-SNAPSHOT-services\.jar$'
       - name: Build image from this exact server archive
-        run: core/docker/build.sh -a amd64 -t ydb-stack-create-insert -x
+        run: core/docker/build.sh -a amd64 -t ydb-stack-read-only -x
       - name: Record owned QA resource baseline
         run: |
           docker ps -aq > "$RUNNER_TEMP/ydb-container-baseline"
           docker network ls -q > "$RUNNER_TEMP/ydb-network-baseline"
           mkdir -p logs
-      - name: Run packaged-server product smoke
+      - name: Run read-only packaged-server product smoke
         run: |
           distribution=testing/trino-product-tests/target/product-test-distribution
           test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-read-only:484-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             io.trino.tests.product.suite.SuiteYdb
       - name: Run independent HTTP and native-state proof
@@ -137,9 +137,9 @@ jobs:
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-read-only:484-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
-            "$RUNNER_TEMP/YdbWriteHttpProof.java" "$GITHUB_WORKSPACE/logs/runtime-http.json"
+            "$RUNNER_TEMP/YdbReadOnlyHttpProof.java" "$GITHUB_WORKSPACE/logs/runtime-http.json"
       - name: Verify cleanup of owned QA containers and networks
         if: always()
         run: |
@@ -191,7 +191,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: e8312003ff71a2a70555c10ace960d379a6bd3a9
+          ref: a334ea8729f6402223ff20a5bac268bc6c30ac7a
           fetch-depth: 0
           persist-credentials: false
       - name: Integrate pinned upstream base without changing published history

@@ -16,7 +16,7 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: 9fce0025738e5809c86a9a92d8f7d0493df83958
+  SOURCE_SHA: 8d367a77556fc3be56ee9ca1d39f755edbf3c557
 
 jobs:
   connector:
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: 9fce0025738e5809c86a9a92d8f7d0493df83958
+          ref: 8d367a77556fc3be56ee9ca1d39f755edbf3c557
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -44,6 +44,11 @@ jobs:
       - name: Error Prone
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb -Perrorprone-compiler -DskipTests clean test-compile
+      - name: Direct read-only regression methods
+        if: matrix.java == '25.0.4'
+        run: |
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbConnectorSmokeTest#testCreateTableAsSelect,TestYdbConnectorTest#testCreateTableAsSelect+testNativeTypeReads+testReadOnlyWritesRejected' test
+          cp -R plugin/trino-ydb/target/surefire-reports plugin/trino-ydb/target/direct-read-only-reports
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
@@ -53,6 +58,7 @@ jobs:
           name: connector-reports-${{ matrix.java }}
           path: |
             plugin/trino-ydb/target/surefire-reports/
+            plugin/trino-ydb/target/direct-read-only-reports/
             core/trino-main/target/surefire-reports/
 
   product:
@@ -70,7 +76,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: 9fce0025738e5809c86a9a92d8f7d0493df83958
+          ref: 8d367a77556fc3be56ee9ca1d39f755edbf3c557
           fetch-depth: 0
           persist-credentials: false
       - uses: ./.github/actions/setup
@@ -161,7 +167,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
-          ref: 9fce0025738e5809c86a9a92d8f7d0493df83958
+          ref: 8d367a77556fc3be56ee9ca1d39f755edbf3c557
           persist-credentials: false
       - name: Build actual Sphinx documentation
         run: docs/build

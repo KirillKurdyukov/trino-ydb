@@ -1,0 +1,169 @@
+name: YDB stack verification
+
+on:
+  push:
+    branches: [qa/ydb-stack-20261015]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+env:
+  CONTINUOUS_INTEGRATION: true
+  MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
+  MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
+  TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
+  SOURCE_SHA: 9fce0025738e5809c86a9a92d8f7d0493df83958
+
+jobs:
+  connector:
+    name: Connector checks JDK ${{ matrix.java }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['25.0.4', '27', '28-ea']
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: Vladimir-Petrunko/trino
+          ref: 9fce0025738e5809c86a9a92d8f7d0493df83958
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          java-version: ${{ matrix.java }}
+          cache: 'true'
+          cleanup-node: 'true'
+      - name: Build reactor with all Maven checks
+        run: ./mvnw -B -ntp -pl plugin/trino-ydb -am -DskipTests install
+      - name: Error Prone
+        if: matrix.java == '25.0.4'
+        run: ./mvnw -B -ntp -pl plugin/trino-ydb -Perrorprone-compiler -DskipTests clean test-compile
+      - name: Complete YDB connector suite
+        if: matrix.java == '25.0.4'
+        run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: connector-reports-${{ matrix.java }}
+          path: |
+            plugin/trino-ydb/target/surefire-reports/
+            core/trino-main/target/surefire-reports/
+
+  product:
+    name: Packaged server and SuiteYdb
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/qa/ydb-stack
+          sparse-checkout-cone-mode: false
+      - name: Preserve independent HTTP QA harness
+        run: cp .github/qa/ydb-stack/YdbReadOnlyHttpProof.java "$RUNNER_TEMP/YdbReadOnlyHttpProof.java"
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: Vladimir-Petrunko/trino
+          ref: 9fce0025738e5809c86a9a92d8f7d0493df83958
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+        with:
+          cache: 'true'
+          cleanup-node: 'true'
+      - name: Build server and product distribution with Maven checks
+        run: ./mvnw -B -ntp -T 2 -DskipTests -P product-test-distribution -pl '!:trino-docs' install
+      - name: Verify YDB is shipped
+        run: |
+          archive=core/trino-server/target/trino-server-484-SNAPSHOT.tar.gz
+          tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-484-SNAPSHOT\.jar$'
+          tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-484-SNAPSHOT-services\.jar$'
+      - name: Build image from this exact server archive
+        run: core/docker/build.sh -a amd64 -t ydb-stack-read-only -x
+      - name: Record owned QA resource baseline
+        run: |
+          docker ps -aq > "$RUNNER_TEMP/ydb-container-baseline"
+          docker network ls -q > "$RUNNER_TEMP/ydb-network-baseline"
+          mkdir -p logs
+      - name: Run read-only packaged-server product smoke
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-read-only:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            io.trino.tests.product.suite.SuiteYdb
+      - name: Run independent HTTP and native-state proof
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-read-only:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            "$RUNNER_TEMP/YdbReadOnlyHttpProof.java" "$GITHUB_WORKSPACE/logs/runtime-http.json"
+      - name: Verify cleanup of owned QA containers and networks
+        if: always()
+        run: |
+          mkdir -p logs
+          if [ ! -f "$RUNNER_TEMP/ydb-container-baseline" ] || [ ! -f "$RUNNER_TEMP/ydb-network-baseline" ]; then
+            printf 'No QA container scenario started\n' > logs/cleanup.txt
+            exit 0
+          fi
+          docker ps -aq > "$RUNNER_TEMP/ydb-container-after"
+          while IFS= read -r id; do
+            if [ -n "$id" ] && ! grep -Fxq "$id" "$RUNNER_TEMP/ydb-container-baseline"; then
+              if ! docker rm -f "$id"; then
+                remaining=$(docker ps -aq --filter "id=$id")
+                test -z "$remaining"
+              fi
+            fi
+          done < "$RUNNER_TEMP/ydb-container-after"
+          docker network ls -q > "$RUNNER_TEMP/ydb-network-after"
+          while IFS= read -r id; do
+            if [ -n "$id" ] && ! grep -Fxq "$id" "$RUNNER_TEMP/ydb-network-baseline"; then
+              if ! docker network rm "$id"; then
+                remaining=$(docker network ls -q --filter "id=$id")
+                test -z "$remaining"
+              fi
+            fi
+          done < "$RUNNER_TEMP/ydb-network-after"
+          docker ps -aq > "$RUNNER_TEMP/ydb-container-final"
+          docker network ls -q > "$RUNNER_TEMP/ydb-network-final"
+          comm -13 <(sort "$RUNNER_TEMP/ydb-container-baseline") <(sort "$RUNNER_TEMP/ydb-container-final") > "$RUNNER_TEMP/ydb-container-leftovers"
+          comm -13 <(sort "$RUNNER_TEMP/ydb-network-baseline") <(sort "$RUNNER_TEMP/ydb-network-final") > "$RUNNER_TEMP/ydb-network-leftovers"
+          test ! -s "$RUNNER_TEMP/ydb-container-leftovers"
+          test ! -s "$RUNNER_TEMP/ydb-network-leftovers"
+          printf 'PASS: no owned QA containers or networks remain\n' > logs/cleanup.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: product-reports
+          path: |
+            testing/trino-product-tests/target/surefire-reports/
+            testing/trino-product-tests/target/reports/
+            logs/
+
+  docs:
+    name: Documentation build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          repository: Vladimir-Petrunko/trino
+          ref: 9fce0025738e5809c86a9a92d8f7d0493df83958
+          persist-credentials: false
+      - name: Build actual Sphinx documentation
+        run: docs/build
+      - name: Verify connector page
+        run: test -s docs/target/html/connector/ydb.html

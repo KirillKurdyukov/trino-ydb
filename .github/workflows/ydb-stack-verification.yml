@@ -16,11 +16,12 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: 13c56e500b8891dbbad7669bbd441a3f6be717e4
+  SOURCE_SHA: a3d9534ad1075ac617361d5d6b866ac76b147d0b
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 5508dca7c42757a848fbec90404eb07f8c7e2cbb
+  EXPECTED_INTEGRATION_TREE_SHA: 11235c896f7d56d758d857e1093e01583d13ad3f
   VERIFY_AGGREGATION: 'true'
   VERIFY_TOPN: 'true'
+  VERIFY_JOIN: 'true'
 
 jobs:
   connector:
@@ -83,6 +84,13 @@ jobs:
           ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbTopN,TestYdbTopNPushdown' test
           mkdir -p plugin/trino-ydb/target/direct-topn-reports
           cp plugin/trino-ydb/target/surefire-reports/*TestYdbTopN* plugin/trino-ydb/target/direct-topn-reports/
+      - name: Direct JOIN key, default and inherited regressions
+        if: matrix.java == '25.0.4' && env.VERIFY_JOIN == 'true'
+        run: |
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbJoinMappings,TestYdbJoinPushdown,TestYdbConnectorTest#testJoin+testJoinWithEmptySides,TestYdbConnectorSmokeTest#testJoin' test
+          mkdir -p plugin/trino-ydb/target/direct-join-reports
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbJoin* plugin/trino-ydb/target/direct-join-reports/
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorTest* plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorSmokeTest* plugin/trino-ydb/target/direct-join-reports/
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
@@ -96,6 +104,7 @@ jobs:
             plugin/trino-ydb/target/direct-expression-reports/
             plugin/trino-ydb/target/direct-aggregation-reports/
             plugin/trino-ydb/target/direct-topn-reports/
+            plugin/trino-ydb/target/direct-join-reports/
             core/trino-main/target/surefire-reports/
             integration-tree.txt
 
@@ -115,6 +124,7 @@ jobs:
           cp .github/qa/ydb-stack/YdbExpressionHttpProof.java "$RUNNER_TEMP/YdbExpressionHttpProof.java"
           cp .github/qa/ydb-stack/YdbAggregationHttpProof.java "$RUNNER_TEMP/YdbAggregationHttpProof.java"
           cp .github/qa/ydb-stack/YdbTopNHttpProof.java "$RUNNER_TEMP/YdbTopNHttpProof.java"
+          cp .github/qa/ydb-stack/YdbJoinHttpProof.java "$RUNNER_TEMP/YdbJoinHttpProof.java"
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
@@ -200,6 +210,17 @@ jobs:
             -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbTopNHttpProof.java" "$GITHUB_WORKSPACE/logs/topn-http.json"
+      - name: Run independent JOIN HTTP and EXPLAIN proof
+        if: env.VERIFY_JOIN == 'true'
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            "$RUNNER_TEMP/YdbJoinHttpProof.java" "$GITHUB_WORKSPACE/logs/join-http.json"
       - name: Verify cleanup of owned QA containers and networks
         if: always()
         run: |

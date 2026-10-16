@@ -16,13 +16,14 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: df8116daf0f1911b7216ea259c1c21665562f80c
+  SOURCE_SHA: f72f4e84e677a24ec912ef432f4774cf54963b38
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 8e38dea9b82306861a1f141cd6af9f8f16d5ff07
+  EXPECTED_INTEGRATION_TREE_SHA: 2277833118c15dec7f0c5cfff3d3a5df8a73138a
   VERIFY_AGGREGATION: 'true'
   VERIFY_TOPN: 'true'
   VERIFY_JOIN: 'true'
   VERIFY_DML: 'true'
+  VERIFY_MERGE: 'true'
 
 jobs:
   connector:
@@ -106,6 +107,13 @@ jobs:
           ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest=TestYdbDmlPushdown test
           mkdir -p plugin/trino-ydb/target/direct-dml-reports
           cp plugin/trino-ydb/target/surefire-reports/*TestYdbDml* plugin/trino-ydb/target/direct-dml-reports/
+      - name: Direct complete MERGE and row-level mutation contracts
+        if: matrix.java == '25.0.4' && env.VERIFY_MERGE == 'true'
+        run: |
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbMerge,TestYdbMergeSink,TestYdbConnectorTest#testMerge*+testUpdate*+testRowLevelUpdate+testDelete*+testExplainAnalyzeWithDelete*,TestYdbConnectorSmokeTest#testMerge+testUpdate+testDelete' test
+          mkdir -p plugin/trino-ydb/target/direct-merge-reports
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbMerge* plugin/trino-ydb/target/direct-merge-reports/
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorTest* plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorSmokeTest* plugin/trino-ydb/target/direct-merge-reports/
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
@@ -121,6 +129,7 @@ jobs:
             plugin/trino-ydb/target/direct-topn-reports/
             plugin/trino-ydb/target/direct-join-reports/
             plugin/trino-ydb/target/direct-dml-reports/
+            plugin/trino-ydb/target/direct-merge-reports/
             core/trino-main/target/surefire-reports/
             integration-tree.txt
 
@@ -142,6 +151,7 @@ jobs:
           cp .github/qa/ydb-stack/YdbTopNHttpProof.java "$RUNNER_TEMP/YdbTopNHttpProof.java"
           cp .github/qa/ydb-stack/YdbJoinHttpProof.java "$RUNNER_TEMP/YdbJoinHttpProof.java"
           cp .github/qa/ydb-stack/YdbDmlHttpProof.java "$RUNNER_TEMP/YdbDmlHttpProof.java"
+          cp .github/qa/ydb-stack/YdbMergeHttpProof.java "$RUNNER_TEMP/YdbMergeHttpProof.java"
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
@@ -249,6 +259,17 @@ jobs:
             -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbDmlHttpProof.java" "$GITHUB_WORKSPACE/logs/dml-http.json"
+      - name: Run independent MERGE and native key-state proof
+        if: env.VERIFY_MERGE == 'true'
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            "$RUNNER_TEMP/YdbMergeHttpProof.java" "$GITHUB_WORKSPACE/logs/merge-http.json"
       - name: Verify cleanup of owned QA containers and networks
         if: always()
         run: |

@@ -22,12 +22,14 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public final class YdbJoinHttpProof
 {
@@ -49,6 +51,22 @@ public final class YdbJoinHttpProof
             environment.start();
             try (Connection connection = environment.createYdbConnection();
                     Statement nativeStatement = connection.createStatement()) {
+                nativeStatement.execute("CREATE TABLE nation (nationkey Int64, regionkey Int64, PRIMARY KEY (nationkey))");
+                nativeStatement.execute("CREATE TABLE region (regionkey Int64, PRIMARY KEY (regionkey))");
+                try (PreparedStatement nations = connection.prepareStatement("INSERT INTO nation (nationkey, regionkey) VALUES (?, ?)");
+                        PreparedStatement regions = connection.prepareStatement("INSERT INTO region (regionkey) VALUES (?)")) {
+                    for (int id = 0; id < 25; id++) {
+                        nations.setLong(1, id);
+                        nations.setLong(2, id % 5);
+                        nations.addBatch();
+                    }
+                    nations.executeBatch();
+                    for (int id = 0; id < 5; id++) {
+                        regions.setLong(1, id);
+                        regions.addBatch();
+                    }
+                    regions.executeBatch();
+                }
                 for (String table : List.of("join_left", "join_right")) {
                     nativeStatement.execute("CREATE TABLE " + table + " (id Int64, k Int64, second_key Int64, f Double, u Uint64, s Utf8, PRIMARY KEY (id))");
                 }
@@ -65,6 +83,26 @@ public final class YdbJoinHttpProof
             URI statement = URI.create("http://" + jdbc.getRawAuthority() + "/v1/statement");
             String enabled = "ydb.join_pushdown_enabled=true";
             String disabled = "ydb.join_pushdown_enabled=false";
+            String requestedJoin = "SELECT n.nationkey,r.regionkey FROM ydb.default.nation n JOIN ydb.default.region r ON n.regionkey=r.regionkey";
+            QueryResult requestedRows = execute(client, statement, requestedJoin, enabled);
+            QueryResult requestedLocal = execute(client, statement, requestedJoin, disabled);
+            List<JsonNode> expectedNationRegionRows = new ArrayList<>();
+            for (int id = 0; id < 25; id++) {
+                expectedNationRegionRows.add(JSON.readTree("[" + id + "," + (id % 5) + "]"));
+            }
+            require(requestedRows.error() == null && requestedRows.rows().size() == 25 &&
+                            Set.copyOf(requestedRows.rows()).equals(Set.copyOf(expectedNationRegionRows)),
+                    "The requested native nation/region JOIN must return all 25 expected rows");
+            require(requestedLocal.error() == null && requestedLocal.rows().size() == 25 &&
+                            Set.copyOf(requestedRows.rows()).equals(Set.copyOf(requestedLocal.rows())),
+                    "The requested JOIN must match disabled pushdown");
+            QueryResult requestedExplain = execute(client, statement, "EXPLAIN " + requestedJoin, enabled);
+            require(requestedExplain.error() == null, "The requested JOIN EXPLAIN must succeed");
+            String requestedPlan = requestedExplain.rows().getFirst().get(0).asText();
+            require(requestedPlan.contains("JOIN") && !requestedPlan.contains("Join") &&
+                            requestedPlan.lines().filter(line -> line.contains("[table = ydb:")).count() == 1,
+                    "The requested enabled JOIN must use one remote source scan");
+            evidence.put("requestedNationRegionRows", 25);
             for (String kind : List.of("INNER", "LEFT", "RIGHT", "FULL")) {
                 String sql = "SELECT l.id, r.id FROM ydb.default.join_left l " + kind + " JOIN ydb.default.join_right r ON l.k = r.k ORDER BY l.id NULLS FIRST, r.id NULLS FIRST";
                 QueryResult pushed = execute(client, statement, sql, enabled);

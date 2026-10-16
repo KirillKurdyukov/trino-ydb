@@ -50,6 +50,12 @@ public final class YdbWriteHttpProof
             environment.start();
             URI jdbc = URI.create(environment.getTrinoJdbcUrl().substring("jdbc:".length()));
             URI statement = URI.create("http://" + jdbc.getRawAuthority() + "/v1/statement");
+            success(client, statement, "CREATE TABLE ydb.default.stack_write (id bigint, value varchar) WITH (primary_key = ARRAY['id'])");
+            expectUpdate(client, statement, "INSERT INTO ydb.default.stack_write VALUES (1, 'ok')", 1);
+            require(success(client, statement, "SELECT value FROM ydb.default.stack_write").rows()
+                    .equals(List.of(JSON.readTree("[\"ok\"]"))), "The requested CREATE/INSERT example must return ok");
+            success(client, statement, "DROP TABLE ydb.default.stack_write");
+            evidence.put("requestedCreateInsertExampleVerified", true);
             expectError(client, statement, "CREATE TABLE ydb.default.missing_key (id bigint)", "INVALID_TABLE_PROPERTY");
             success(client, statement, "CREATE TABLE ydb.default.stack_write (payload varchar, tenant bigint, event_id bigint) WITH (primary_key = ARRAY['event_id', 'tenant'])");
             expectUpdate(client, statement, "INSERT INTO ydb.default.stack_write VALUES ('ok', 1, 10), ('nullable-key', 2, NULL)", 2);

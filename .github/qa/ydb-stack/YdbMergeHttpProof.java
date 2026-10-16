@@ -65,6 +65,29 @@ public final class YdbMergeHttpProof
             }
             URI jdbc = URI.create(environment.getTrinoJdbcUrl().substring("jdbc:".length()));
             URI statement = URI.create("http://" + jdbc.getRawAuthority() + "/v1/statement");
+            success(client, statement, "CREATE TABLE ydb.default.stack_write (id bigint, value varchar) WITH (primary_key = ARRAY['id'])");
+            expectRowChange(client, statement, "INSERT INTO ydb.default.stack_write VALUES (1, 'ok')", 1);
+            expectRowChange(client, statement, "MERGE INTO ydb.default.stack_write t USING (VALUES (1, 'merged'), (2, 'inserted')) s(id, value) " +
+                    "ON t.id = s.id WHEN MATCHED THEN UPDATE SET value = s.value " +
+                    "WHEN NOT MATCHED THEN INSERT (id, value) VALUES (s.id, s.value)", 2);
+            require(success(client, statement, "SELECT id, value FROM ydb.default.stack_write ORDER BY id").rows()
+                    .equals(List.of(JSON.readTree("[1,\"merged\"]"), JSON.readTree("[2,\"inserted\"]"))),
+                    "The requested MERGE example must update and insert its exact rows");
+            try (Connection connection = environment.createYdbConnection();
+                    Statement nativeStatement = connection.createStatement();
+                    ResultSet rows = nativeStatement.executeQuery("SELECT id, value FROM stack_write ORDER BY id")) {
+                require(rows.next() && rows.getLong(1) == 1 && rows.getString(2).equals("merged"),
+                        "Native state must confirm the requested MERGE update");
+                require(rows.next() && rows.getLong(1) == 2 && rows.getString(2).equals("inserted") && !rows.next(),
+                        "Native state must confirm the requested MERGE insert without extra rows");
+                evidence.put("requestedNativeMergeRows", 2);
+            }
+            expectRowChange(client, statement, "MERGE INTO ydb.default.stack_write t USING (VALUES 1, 2) s(id) " +
+                    "ON t.id = s.id WHEN MATCHED THEN DELETE", 2);
+            require(success(client, statement, "SELECT count(*) FROM ydb.default.stack_write").rows()
+                    .equals(List.of(JSON.readTree("[0]"))), "The requested MERGE delete must remove both rows");
+            success(client, statement, "DROP TABLE ydb.default.stack_write");
+            evidence.put("requestedMergeExamplesVerified", true);
             String defaultMerge = "MERGE INTO ydb.default.merge_edges t USING (VALUES (1, 11, 20)) s(tenant, id, value) " +
                     "ON t.tenant = s.tenant AND t.id = s.id WHEN MATCHED THEN UPDATE SET value = s.value";
             expectError(client, statement, defaultMerge, "NOT_SUPPORTED");

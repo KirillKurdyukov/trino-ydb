@@ -65,6 +65,16 @@ public final class YdbDmlHttpProof
             }
             URI jdbc = URI.create(environment.getTrinoJdbcUrl().substring("jdbc:".length()));
             URI statement = URI.create("http://" + jdbc.getRawAuthority() + "/v1/statement");
+            success(client, statement, "CREATE TABLE ydb.default.stack_write (id bigint, value varchar) WITH (primary_key = ARRAY['id'])");
+            expectUpdate(client, statement, "INSERT INTO ydb.default.stack_write VALUES (1, 'ok')", 1);
+            expectUpdate(client, statement, "UPDATE ydb.default.stack_write SET value = 'updated' WHERE id = 1", 1);
+            require(success(client, statement, "SELECT value FROM ydb.default.stack_write WHERE id = 1").rows()
+                    .equals(List.of(JSON.readTree("[\"updated\"]"))), "The requested UPDATE example must retain the exact value");
+            expectUpdate(client, statement, "DELETE FROM ydb.default.stack_write WHERE id = 1", 1);
+            require(success(client, statement, "SELECT count(*) FROM ydb.default.stack_write").rows()
+                    .equals(List.of(JSON.readTree("[0]"))), "The requested DELETE example must remove exactly its row");
+            success(client, statement, "DROP TABLE ydb.default.stack_write");
+            evidence.put("requestedDmlExamplesVerified", true);
             expectUpdate(client, statement, "UPDATE ydb.default.dml_edges SET value = 99 WHERE tenant IS NULL", 2);
             QueryResult nullableKeys = success(client, statement, "SELECT value, tenant, id FROM ydb.default.dml_edges WHERE tenant IS NULL ORDER BY id NULLS FIRST");
             require(nullableKeys.rows().equals(List.of(JSON.readTree("[99,null,null]"), JSON.readTree("[99,null,12]"))), "RETURNING NULL keys must still count both updated rows");

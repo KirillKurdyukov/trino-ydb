@@ -16,7 +16,7 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: de94f942025a09f7cbcd57c5bbb42673b9a5fe5e
+  SOURCE_SHA: f0ef7727ae403907598c2bc9d3000b16d2a13500
   UPSTREAM_BASE_SHA: f8c6e46cea4d9d23ce4a0cbec0e3f58447df1ab6
   EXPECTED_INTEGRATION_TREE_SHA: f0e8673305600924ab671d502f3c8196b637877a
   VERIFY_WRITE: 'false'
@@ -81,7 +81,7 @@ jobs:
       - name: Direct CREATE, INSERT and DDL regressions
         if: matrix.java == '25.0.4' && env.VERIFY_WRITE == 'true'
         run: |
-          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testRenameTable*,TestYdbConnectorTest#testInsert*+testAdd*+testAlterTableAddLongColumnName+testDropColumn+testDropAndAddColumnWithSameName+testDropRowField*+testDropNotNullConstraint*+testRenameTable*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testNativeExecute+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testRenameTable*,TestYdbConnectorTest#testInsert*+testAdd*+testAlterTableAddLongColumnName+testDropColumn+testDropAndAddColumnWithSameName+testDropRowField*+testDropNotNullConstraint*+testRenameTable*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
           cp -R plugin/trino-ydb/target/surefire-reports plugin/trino-ydb/target/direct-write-reports
       - name: Direct expression and predicate regressions
         if: matrix.java == '25.0.4' && env.VERIFY_EXPRESSION == 'true'
@@ -132,6 +132,7 @@ jobs:
           path: |
             plugin/trino-ydb/target/surefire-reports/
             plugin/trino-ydb/target/direct-write-reports/
+            plugin/trino-ydb/target/direct-readonly-reports/
             plugin/trino-ydb/target/direct-expression-reports/
             plugin/trino-ydb/target/direct-aggregation-reports/
             plugin/trino-ydb/target/direct-topn-reports/

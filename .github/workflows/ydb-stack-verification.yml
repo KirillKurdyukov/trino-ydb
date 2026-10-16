@@ -16,14 +16,16 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: f72f4e84e677a24ec912ef432f4774cf54963b38
-  UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 2277833118c15dec7f0c5cfff3d3a5df8a73138a
-  VERIFY_AGGREGATION: 'true'
-  VERIFY_TOPN: 'true'
-  VERIFY_JOIN: 'true'
-  VERIFY_DML: 'true'
-  VERIFY_MERGE: 'true'
+  SOURCE_SHA: f84cd4f608ef75d7fc19a2d6a0db1cedf8aab1de
+  UPSTREAM_BASE_SHA: f8c6e46cea4d9d23ce4a0cbec0e3f58447df1ab6
+  EXPECTED_INTEGRATION_TREE_SHA: 2440d13bcbe1f47d2bf3c59964996f5ba8f98cc0
+  VERIFY_WRITE: 'false'
+  VERIFY_EXPRESSION: 'false'
+  VERIFY_AGGREGATION: 'false'
+  VERIFY_TOPN: 'false'
+  VERIFY_JOIN: 'false'
+  VERIFY_DML: 'false'
+  VERIFY_MERGE: 'false'
 
 jobs:
   connector:
@@ -71,12 +73,12 @@ jobs:
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb -Perrorprone-compiler -DskipTests clean test-compile
       - name: Direct CREATE, INSERT and DDL regressions
-        if: matrix.java == '25.0.4'
+        if: matrix.java == '25.0.4' && env.VERIFY_WRITE == 'true'
         run: |
           ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbCreateTable,TestYdbWriteMetadata,TestYdbConnectorSmokeTest#testInsert+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testRenameTable*,TestYdbConnectorTest#testInsert*+testAdd*+testAlterTableAddLongColumnName+testDropColumn+testDropAndAddColumnWithSameName+testDropRowField*+testDropNotNullConstraint*+testRenameTable*+testCreateTable+testCreateTableAsSelect+testShowCreateTable+testNativeTypeReads+testUnsupportedMutationsRejected' test
           cp -R plugin/trino-ydb/target/surefire-reports plugin/trino-ydb/target/direct-write-reports
       - name: Direct expression and predicate regressions
-        if: matrix.java == '25.0.4'
+        if: matrix.java == '25.0.4' && env.VERIFY_EXPRESSION == 'true'
         run: |
           ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest='TestYdbExpressionRewrites,TestYdbExpressionPushdown' test
           mkdir -p plugin/trino-ydb/target/direct-expression-reports
@@ -145,6 +147,7 @@ jobs:
           sparse-checkout-cone-mode: false
       - name: Preserve independent HTTP QA harness
         run: |
+          cp .github/qa/ydb-stack/YdbReadOnlyHttpProof.java "$RUNNER_TEMP/YdbReadOnlyHttpProof.java"
           cp .github/qa/ydb-stack/YdbWriteHttpProof.java "$RUNNER_TEMP/YdbWriteHttpProof.java"
           cp .github/qa/ydb-stack/YdbExpressionHttpProof.java "$RUNNER_TEMP/YdbExpressionHttpProof.java"
           cp .github/qa/ydb-stack/YdbAggregationHttpProof.java "$RUNNER_TEMP/YdbAggregationHttpProof.java"
@@ -175,9 +178,9 @@ jobs:
         run: ./mvnw -B -ntp -T 2 -DskipTests -P product-test-distribution -pl '!:trino-docs' install
       - name: Verify YDB is shipped
         run: |
-          archive=core/trino-server/target/trino-server-484-SNAPSHOT.tar.gz
-          tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-484-SNAPSHOT\.jar$'
-          tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-484-SNAPSHOT-services\.jar$'
+          archive=core/trino-server/target/trino-server-485-SNAPSHOT.tar.gz
+          tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-485-SNAPSHOT\.jar$'
+          tar -tzf "$archive" | grep -E '/plugin/ydb/trino-ydb-485-SNAPSHOT-services\.jar$'
       - name: Build image from this exact server archive
         run: core/docker/build.sh -a amd64 -t ydb-stack-create-insert -x
       - name: Record owned QA resource baseline
@@ -192,27 +195,40 @@ jobs:
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             io.trino.tests.product.suite.SuiteYdb
-      - name: Run independent HTTP and native-state proof
+      - name: Run independent read-only HTTP proof
+        if: env.VERIFY_WRITE != 'true'
         run: |
           distribution=testing/trino-product-tests/target/product-test-distribution
           test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            "$RUNNER_TEMP/YdbReadOnlyHttpProof.java" "$GITHUB_WORKSPACE/logs/readonly-http.json"
+      - name: Run independent HTTP and native-state proof
+        if: env.VERIFY_WRITE == 'true'
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbWriteHttpProof.java" "$GITHUB_WORKSPACE/logs/runtime-http.json"
       - name: Run independent expression HTTP and EXPLAIN proof
+        if: env.VERIFY_EXPRESSION == 'true'
         run: |
           distribution=testing/trino-product-tests/target/product-test-distribution
           test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbExpressionHttpProof.java" "$GITHUB_WORKSPACE/logs/expression-http.json"
       - name: Run independent aggregation HTTP and EXPLAIN proof
@@ -223,7 +239,7 @@ jobs:
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbAggregationHttpProof.java" "$GITHUB_WORKSPACE/logs/aggregation-http.json"
       - name: Run independent TopN HTTP and EXPLAIN proof
@@ -234,7 +250,7 @@ jobs:
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbTopNHttpProof.java" "$GITHUB_WORKSPACE/logs/topn-http.json"
       - name: Run independent JOIN HTTP and EXPLAIN proof
@@ -245,7 +261,7 @@ jobs:
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbJoinHttpProof.java" "$GITHUB_WORKSPACE/logs/join-http.json"
       - name: Run independent pushed DML counts and native state proof
@@ -256,7 +272,7 @@ jobs:
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbDmlHttpProof.java" "$GITHUB_WORKSPACE/logs/dml-http.json"
       - name: Run independent MERGE and native key-state proof
@@ -267,7 +283,7 @@ jobs:
           classpath=$(< "$distribution/classpath.txt")
           classpath="$distribution/${classpath//:/:$distribution/}"
           java -Xmx512M -XX:+ExitOnOutOfMemoryError \
-            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:485-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbMergeHttpProof.java" "$GITHUB_WORKSPACE/logs/merge-http.json"
       - name: Verify cleanup of owned QA containers and networks

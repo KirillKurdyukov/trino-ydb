@@ -137,8 +137,8 @@ public final class YdbWriteHttpProof
             }
             for (String sql : List.of(
                     "UPDATE ydb.default.stack_write SET event_id = 11 WHERE tenant = 1",
-                    "UPDATE ydb.default.stack_write SET payload = 'changed' WHERE tenant = 1",
-                    "DELETE FROM ydb.default.stack_write WHERE tenant = 1",
+                    "UPDATE ydb.default.stack_write SET payload = upper(payload) WHERE tenant = 1",
+                    "DELETE FROM ydb.default.stack_write WHERE payload LIKE '%o%'",
                     "MERGE INTO ydb.default.stack_write t USING (VALUES (1, 'changed')) s(tenant, payload) ON t.tenant = s.tenant WHEN MATCHED THEN UPDATE SET payload = s.payload")) {
                 expectError(client, statement, sql, "NOT_SUPPORTED");
             }

@@ -16,12 +16,13 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: 8645311bdf8178da9102012e0860ae90e1ccf80e
+  SOURCE_SHA: a8158e032ca52f492d78ca422bc18c7d23f4f79f
   UPSTREAM_BASE_SHA: cf8992f543d0671b2579fded1d17ae3ee862d543
-  EXPECTED_INTEGRATION_TREE_SHA: 43fd14b8528f7f21cceccfa626f2cdbb143c4986
+  EXPECTED_INTEGRATION_TREE_SHA: 5b92fec7991dcdd1faece684b96aabc15434de3b
   VERIFY_AGGREGATION: 'true'
   VERIFY_TOPN: 'true'
   VERIFY_JOIN: 'true'
+  VERIFY_DML: 'true'
 
 jobs:
   connector:
@@ -99,6 +100,12 @@ jobs:
           mkdir -p plugin/trino-ydb/target/direct-join-reports
           cp plugin/trino-ydb/target/surefire-reports/*TestYdbJoin* plugin/trino-ydb/target/direct-join-reports/
           cp plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorTest* plugin/trino-ydb/target/surefire-reports/*TestYdbConnectorSmokeTest* plugin/trino-ydb/target/direct-join-reports/
+      - name: Direct pushed UPDATE and DELETE counts
+        if: matrix.java == '25.0.4' && env.VERIFY_DML == 'true'
+        run: |
+          ./mvnw -B -ntp -pl plugin/trino-ydb -Dtest=TestYdbDmlPushdown test
+          mkdir -p plugin/trino-ydb/target/direct-dml-reports
+          cp plugin/trino-ydb/target/surefire-reports/*TestYdbDml* plugin/trino-ydb/target/direct-dml-reports/
       - name: Complete YDB connector suite
         if: matrix.java == '25.0.4'
         run: ./mvnw -B -ntp -pl plugin/trino-ydb verify
@@ -113,6 +120,7 @@ jobs:
             plugin/trino-ydb/target/direct-aggregation-reports/
             plugin/trino-ydb/target/direct-topn-reports/
             plugin/trino-ydb/target/direct-join-reports/
+            plugin/trino-ydb/target/direct-dml-reports/
             core/trino-main/target/surefire-reports/
             integration-tree.txt
 
@@ -133,6 +141,7 @@ jobs:
           cp .github/qa/ydb-stack/YdbAggregationHttpProof.java "$RUNNER_TEMP/YdbAggregationHttpProof.java"
           cp .github/qa/ydb-stack/YdbTopNHttpProof.java "$RUNNER_TEMP/YdbTopNHttpProof.java"
           cp .github/qa/ydb-stack/YdbJoinHttpProof.java "$RUNNER_TEMP/YdbJoinHttpProof.java"
+          cp .github/qa/ydb-stack/YdbDmlHttpProof.java "$RUNNER_TEMP/YdbDmlHttpProof.java"
       - uses: actions/checkout@v7.0.1
         with:
           repository: Vladimir-Petrunko/trino
@@ -229,6 +238,17 @@ jobs:
             -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
             -cp "${test_jar[0]}:$classpath" \
             "$RUNNER_TEMP/YdbJoinHttpProof.java" "$GITHUB_WORKSPACE/logs/join-http.json"
+      - name: Run independent pushed DML counts and native state proof
+        if: env.VERIFY_DML == 'true'
+        run: |
+          distribution=testing/trino-product-tests/target/product-test-distribution
+          test_jar=("$distribution"/lib/trino-product-tests-*-tests.jar)
+          classpath=$(< "$distribution/classpath.txt")
+          classpath="$distribution/${classpath//:/:$distribution/}"
+          java -Xmx512M -XX:+ExitOnOutOfMemoryError \
+            -Dtrino.product-tests.image=ydb-stack-create-insert:484-SNAPSHOT-amd64 \
+            -cp "${test_jar[0]}:$classpath" \
+            "$RUNNER_TEMP/YdbDmlHttpProof.java" "$GITHUB_WORKSPACE/logs/dml-http.json"
       - name: Verify cleanup of owned QA containers and networks
         if: always()
         run: |

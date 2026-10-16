@@ -50,6 +50,8 @@ public final class YdbReadOnlyHttpProof
         try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(30)).build()) {
             environment.start();
             seed(environment);
+            List<String> nativeTablesBefore = nativeTableNames(environment);
+            evidence.put("nativeTablesBefore", nativeTablesBefore);
             URI jdbc = URI.create(environment.getTrinoJdbcUrl().substring("jdbc:".length()));
             URI statement = URI.create("http://" + jdbc.getRawAuthority() + "/v1/statement");
             QueryResult count = execute(client, statement, "SELECT COUNT(*) FROM ydb.default.nation");
@@ -75,7 +77,9 @@ public final class YdbReadOnlyHttpProof
                     "MERGE INTO ydb.default.guarded_rows t USING (VALUES (1, 'changed')) s(id, value) ON t.id = s.id WHEN MATCHED THEN UPDATE SET value = s.value",
                     "ALTER TABLE ydb.default.guarded_rows ADD COLUMN added bigint",
                     "ALTER TABLE ydb.default.guarded_rows RENAME TO ydb.default.should_not_exist",
-                    "DROP TABLE ydb.default.guarded_rows")) {
+                    "DROP TABLE ydb.default.guarded_rows",
+                    "CALL ydb.system.execute(query => 'UPDATE guarded_rows SET value = ''changed''u WHERE id = 1')",
+                    "CALL ydb.system.execute(query => 'CREATE TABLE native_execute_forbidden (id Int64, PRIMARY KEY (id))')")) {
                 QueryResult rejected = execute(client, statement, sql);
                 require(rejected.error() != null && rejected.error().path("errorName").asText().equals("NOT_SUPPORTED"),
                         "Read-only operation must fail with NOT_SUPPORTED: " + sql);
@@ -87,6 +91,10 @@ public final class YdbReadOnlyHttpProof
                         "Native state must be unchanged after all rejected writes");
                 evidence.put("nativeGuard", Map.of("id", 1, "value", "original", "rows", 1));
             }
+            List<String> nativeTablesAfter = nativeTableNames(environment);
+            evidence.put("nativeTablesAfter", nativeTablesAfter);
+            require(nativeTablesAfter.equals(nativeTablesBefore), "Native tables must be unchanged after rejected DDL");
+            evidence.put("nativeExecuteRejections", 2);
             evidence.put("result", "PASS");
         }
         catch (Throwable caught) {
@@ -114,7 +122,20 @@ public final class YdbReadOnlyHttpProof
         if (failure != null) {
             throw new RuntimeException("Read-only HTTP proof failed", failure);
         }
-        System.out.println("PASS: read-only HTTP rows, native edges, eight rejected mutations and unchanged native state");
+        System.out.println("PASS: read-only HTTP rows, native edges, ten rejected direct/native mutations and unchanged native state");
+    }
+
+    private static List<String> nativeTableNames(YdbEnvironment environment)
+            throws Exception
+    {
+        List<String> names = new ArrayList<>();
+        try (Connection connection = environment.createYdbConnection();
+                ResultSet tables = connection.getMetaData().getTables(null, null, "%", null)) {
+            while (tables.next()) {
+                names.add(tables.getString("TABLE_NAME"));
+            }
+        }
+        return names.stream().sorted().toList();
     }
 
     private static void seed(YdbEnvironment environment)

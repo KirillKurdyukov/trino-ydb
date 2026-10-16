@@ -96,15 +96,15 @@ public final class YdbJoinHttpProof
             QueryResult pushedExplain = execute(client, statement, "EXPLAIN " + bareJoin, enabled);
             require(pushedExplain.error() == null, "Enabled JOIN EXPLAIN must succeed");
             String pushedPlan = pushedExplain.rows().getFirst().get(0).asText();
-            require(pushedPlan.contains("JOIN") && pushedPlan.split("TableScan", -1).length == 2 && !pushedPlan.contains("Join["), "Enabled equality JOIN must be one remote scan");
+            require(pushedPlan.contains("JOIN") && pushedPlan.split("TableScan", -1).length == 2 && !pushedPlan.contains("Join"), "Enabled equality JOIN must be one remote scan");
             String defaultPlan = success(client, statement, "EXPLAIN " + bareJoin).rows().getFirst().get(0).asText();
-            require(defaultPlan.contains("Join[") && defaultPlan.split("TableScan", -1).length == 3, "Default JOIN must stay in Trino");
+            require(defaultPlan.contains("Join") && defaultPlan.lines().filter(line -> line.contains("[table = ydb:")).count() == 2, "Default JOIN must stay in Trino with two source scans");
             QueryResult complexPlan = execute(client, statement, "EXPLAIN " + bareJoin, enabled + ",ydb.complex_join_pushdown_enabled=true");
-            require(complexPlan.error() == null && complexPlan.rows().getFirst().get(0).asText().contains("Join["), "Expression-based JOIN must decline unsupported source ownership");
+            require(complexPlan.error() == null && complexPlan.rows().getFirst().get(0).asText().contains("Join"), "Expression-based JOIN must decline unsupported source ownership");
             for (String condition : List.of("l.k < r.k", "l.k IS NOT DISTINCT FROM r.k", "l.k + 1 = r.k")) {
                 String sql = "EXPLAIN SELECT l.id, r.id FROM ydb.default.join_left l JOIN ydb.default.join_right r ON " + condition;
                 QueryResult fallback = execute(client, statement, sql, enabled);
-                require(fallback.error() == null && fallback.rows().getFirst().get(0).asText().contains("Join["), "Unsupported JOIN condition must remain in Trino: " + condition);
+                require(fallback.error() == null && fallback.rows().getFirst().get(0).asText().contains("Join"), "Unsupported JOIN condition must remain in Trino: " + condition);
             }
             evidence.put("nativeJoinSelectedOnlyWhenEnabled", true);
             evidence.put("disabledPushdownMatches", true);

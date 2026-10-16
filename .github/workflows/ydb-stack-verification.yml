@@ -16,16 +16,16 @@ env:
   MAVEN_OPTS: "-Xmx3G -XX:+ExitOnOutOfMemoryError"
   MAVEN_ARGS: "--global-settings ${{ github.workspace }}/.mvn/settings-ci.xml"
   TESTCONTAINERS_PULL_PAUSE_TIMEOUT: 600
-  SOURCE_SHA: 8391eb2bfe8fb8b1d491e52f1a043bbc37a27df7
+  SOURCE_SHA: 4a63678f2237758229ed8e1077aaba8f592f4424
   UPSTREAM_BASE_SHA: f8c6e46cea4d9d23ce4a0cbec0e3f58447df1ab6
-  EXPECTED_INTEGRATION_TREE_SHA: 785ab30f64756256410d23b6e7e632b6f2d118b8
+  EXPECTED_INTEGRATION_TREE_SHA: 4890f755fbbaa17e6e90e57aee499d3e7de81f60
   VERIFY_WRITE: 'true'
   VERIFY_EXPRESSION: 'true'
   VERIFY_AGGREGATION: 'true'
   VERIFY_TOPN: 'true'
   VERIFY_JOIN: 'true'
-  VERIFY_DML: 'false'
-  VERIFY_MERGE: 'false'
+  VERIFY_DML: 'true'
+  VERIFY_MERGE: 'true'
 
 jobs:
   connector:
